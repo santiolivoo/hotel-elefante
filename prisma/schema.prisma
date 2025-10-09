@@ -18,6 +18,7 @@ model User {
   updatedAt     DateTime      @updatedAt
   operatorInfo  Operator?
   reservations  Reservation[]
+  promotions    Promotion[]
 }
 
 model Operator {
@@ -132,4 +133,22 @@ model Reply {
   body       String         @db.Text
   sentAt     DateTime       @default(now())
   contact    ContactMessage @relation(fields: [contactId], references: [id], onDelete: Cascade)
+}
+
+model Promotion {
+  id             String   @id @default(cuid())
+  subject        String
+  content        String   @db.Text
+  imageUrl       String?
+  ctaText        String?
+  ctaUrl         String?
+  targetAudience String   @default("ALL") // ALL, ACTIVE_CUSTOMERS, VIP_CUSTOMERS
+  sentBy         String
+  recipientCount Int      @default(0)
+  sentCount      Int      @default(0)
+  failedCount    Int      @default(0)
+  status         String   @default("DRAFT") // DRAFT, SENDING, SENT, PARTIALLY_SENT, FAILED
+  createdAt      DateTime @default(now())
+  sentAt         DateTime?
+  sentByUser     User     @relation(fields: [sentBy], references: [id])
 }

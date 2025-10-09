@@ -120,7 +120,7 @@ export default function ContactoPage() {
                         <p className="text-sm text-muted-foreground">
                           San Lorenzo, Salta, Argentina
                           <br />
-                          Cerca del Cerro Elefante
+                          En el Cerro Elefante
                         </p>
                       </div>
                     </div>
@@ -133,7 +133,7 @@ export default function ContactoPage() {
                       <Phone className="h-6 w-6 text-primary" />
                       <div>
                         <h3 className="font-semibold">Teléfono</h3>
-                        <p className="text-sm text-muted-foreground">+54 387 123-4567</p>
+                        <p className="text-sm text-muted-foreground">+54 9 387 5850581</p>
                       </div>
                     </div>
                   </CardContent>

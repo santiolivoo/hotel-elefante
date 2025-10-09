@@ -4,7 +4,7 @@ import { authOptions } from '@/lib/auth'
 import { redirect } from 'next/navigation'
 import { Navbar } from '@/components/layout/navbar'
 import { Button } from '@/components/ui/button'
-import { Bed, Users, BarChart } from 'lucide-react'
+import { Bed, Users, BarChart, Mail, Settings } from 'lucide-react'
 
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
   const session = await getServerSession(authOptions)
@@ -24,6 +24,12 @@ export default async function AdminLayout({ children }: { children: React.ReactN
             </Button>
             <Button variant="ghost" className="w-full justify-start" asChild>
               <Link href="/admin/analiticas"><BarChart className="mr-2 h-4 w-4" />Analíticas</Link>
+            </Button>
+            <Button variant="ghost" className="w-full justify-start" asChild>
+              <Link href="/admin/promociones"><Mail className="mr-2 h-4 w-4" />Promociones</Link>
+            </Button>
+            <Button variant="ghost" className="w-full justify-start" asChild>
+              <Link href="/admin/configuracion"><Settings className="mr-2 h-4 w-4" />Configuración</Link>
             </Button>
           </nav>
         </aside>

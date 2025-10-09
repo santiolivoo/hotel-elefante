@@ -3,6 +3,7 @@ import { prisma } from '@/lib/prisma'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { z } from 'zod'
+import { sendReservationConfirmationEmail } from '@/lib/email-service'
 
 const reservationSchema = z.object({
   roomId: z.number(),
@@ -180,6 +181,27 @@ export async function POST(request: NextRequest) {
         },
       },
     })
+
+    // Enviar email de confirmación (no bloquear si falla)
+    console.log('📧 Intentando enviar email de confirmación a:', reservation.user.email)
+    try {
+      const emailResult = await sendReservationConfirmationEmail({
+        userName: reservation.user.name || 'Cliente',
+        userEmail: reservation.user.email,
+        reservationId: reservation.id,
+        roomType: reservation.room.roomType.name,
+        roomNumber: reservation.room.number,
+        checkIn: reservation.checkIn,
+        checkOut: reservation.checkOut,
+        guests: reservation.guests,
+        totalAmount: Number(reservation.totalAmount),
+        nights,
+      })
+      console.log('✅ Email de confirmación enviado exitosamente:', emailResult)
+    } catch (emailError) {
+      console.error('❌ Error al enviar email de confirmación:', emailError)
+      // No fallar la reserva si el email no se puede enviar
+    }
 
     return NextResponse.json(reservation, { status: 201 })
   } catch (error) {
