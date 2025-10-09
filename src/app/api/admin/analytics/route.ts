@@ -16,173 +16,267 @@ export async function GET(request: NextRequest) {
     const searchParams = request.nextUrl.searchParams
     const from = searchParams.get('from')
     const to = searchParams.get('to')
+    const period = searchParams.get('period') || '30' // días por defecto
 
-    const fromDate = from ? new Date(from) : new Date(new Date().setMonth(new Date().getMonth() - 1))
+    const fromDate = from ? new Date(from) : new Date(new Date().setDate(new Date().getDate() - parseInt(period)))
     const toDate = to ? new Date(to) : new Date()
 
-    // Total de reservas
+    // ===== MÉTRICAS BÁSICAS =====
     const totalReservations = await prisma.reservation.count({
-      where: {
-        createdAt: {
-          gte: fromDate,
-          lte: toDate,
-        },
-      },
+      where: { createdAt: { gte: fromDate, lte: toDate } }
     })
 
-    // Reservas confirmadas
     const confirmedReservations = await prisma.reservation.count({
-      where: {
-        createdAt: {
-          gte: fromDate,
-          lte: toDate,
-        },
-        status: 'CONFIRMED',
-      },
+      where: { createdAt: { gte: fromDate, lte: toDate }, status: 'CONFIRMED' }
     })
 
-    // Reservas canceladas
     const cancelledReservations = await prisma.reservation.count({
-      where: {
-        createdAt: {
-          gte: fromDate,
-          lte: toDate,
-        },
-        status: 'CANCELLED',
-      },
+      where: { createdAt: { gte: fromDate, lte: toDate }, status: 'CANCELLED' }
     })
 
-    // Ingresos totales
     const revenue = await prisma.reservation.aggregate({
       where: {
-        createdAt: {
-          gte: fromDate,
-          lte: toDate,
-        },
-        status: {
-          in: ['CONFIRMED', 'CHECKED_IN', 'CHECKED_OUT'],
-        },
+        createdAt: { gte: fromDate, lte: toDate },
+        status: { in: ['CONFIRMED', 'CHECKED_IN', 'CHECKED_OUT'] }
       },
-      _sum: {
-        paidAmount: true,
-      },
+      _sum: { paidAmount: true }
     })
 
-    // ADR (Average Daily Rate) - Precio medio por noche
+    // ===== CÁLCULOS ADR Y REVPAR =====
     const reservationsWithAmount = await prisma.reservation.findMany({
       where: {
-        createdAt: {
-          gte: fromDate,
-          lte: toDate,
-        },
-        status: {
-          in: ['CONFIRMED', 'CHECKED_IN', 'CHECKED_OUT'],
-        },
+        createdAt: { gte: fromDate, lte: toDate },
+        status: { in: ['CONFIRMED', 'CHECKED_IN', 'CHECKED_OUT'] }
       },
-      select: {
-        totalAmount: true,
-        checkIn: true,
-        checkOut: true,
-      },
+      select: { totalAmount: true, checkIn: true, checkOut: true, roomId: true }
     })
 
     let totalNights = 0
     let totalAmount = 0
-
     reservationsWithAmount.forEach((res) => {
-      const nights = Math.ceil(
-        (new Date(res.checkOut).getTime() - new Date(res.checkIn).getTime()) /
-          (1000 * 60 * 60 * 24)
-      )
+      const nights = Math.ceil((new Date(res.checkOut).getTime() - new Date(res.checkIn).getTime()) / (1000 * 60 * 60 * 24))
       totalNights += nights
       totalAmount += Number(res.totalAmount)
     })
 
     const adr = totalNights > 0 ? totalAmount / totalNights : 0
+    
+    // Total de habitaciones disponibles (asumiendo que hay habitaciones en la BD)
+    const totalRooms = await prisma.room.count()
+    const daysInPeriod = Math.ceil((toDate.getTime() - fromDate.getTime()) / (1000 * 60 * 60 * 24))
+    const availableRoomNights = totalRooms * daysInPeriod
+    const revpar = availableRoomNights > 0 ? Number(revenue._sum.paidAmount || 0) / availableRoomNights : 0
 
-    // Tasa de conversión
-    const conversionRate =
-      totalReservations > 0 ? (confirmedReservations / totalReservations) * 100 : 0
+    // ===== INGRESOS POR MES (últimos 12 meses) - Simplificado =====
+    const twelveMonthsAgo = new Date()
+    twelveMonthsAgo.setMonth(twelveMonthsAgo.getMonth() - 12)
 
-    // Porcentaje de cancelaciones
-    const cancellationRate =
-      totalReservations > 0 ? (cancelledReservations / totalReservations) * 100 : 0
-
-    // Ocupación por tipo de habitación
-    const roomTypeOccupancy = await prisma.reservation.groupBy({
-      by: ['roomId'],
+    const revenueData = await prisma.reservation.findMany({
       where: {
-        createdAt: {
-          gte: fromDate,
-          lte: toDate,
-        },
-        status: {
-          in: ['CONFIRMED', 'CHECKED_IN', 'CHECKED_OUT'],
-        },
+        createdAt: { gte: twelveMonthsAgo },
+        status: { in: ['CONFIRMED', 'CHECKED_IN', 'CHECKED_OUT'] }
       },
-      _count: true,
+      select: { createdAt: true, paidAmount: true }
     })
 
-    // Reservas por mes (últimos 6 meses)
-    const sixMonthsAgo = new Date()
-    sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6)
+    const revenueByMonth = revenueData.reduce((acc: any[], res) => {
+      const month = res.createdAt.toISOString().slice(0, 7) // YYYY-MM
+      const existing = acc.find(item => item.month === month)
+      if (existing) {
+        existing.reservations++
+        existing.revenue += Number(res.paidAmount)
+      } else {
+        acc.push({
+          month,
+          reservations: 1,
+          revenue: Number(res.paidAmount)
+        })
+      }
+      return acc
+    }, []).sort((a, b) => a.month.localeCompare(b.month))
 
-    const reservationsByMonth = await prisma.$queryRaw`
-      SELECT 
-        FORMAT(createdAt, 'yyyy-MM') as month,
-        COUNT(*) as count,
-        SUM(CAST(paidAmount as DECIMAL(18,2))) as revenue
-      FROM Reservation
-      WHERE createdAt >= ${sixMonthsAgo}
-        AND status IN ('CONFIRMED', 'CHECKED_IN', 'CHECKED_OUT')
-      GROUP BY FORMAT(createdAt, 'yyyy-MM')
-      ORDER BY month
-    `
-
-    // Lead time promedio (días entre reserva y check-in)
-    const reservationsWithLeadTime = await prisma.reservation.findMany({
+    // ===== RESERVAS POR TIPO DE HABITACIÓN =====
+    const reservationsByRoomType = await prisma.reservation.groupBy({
+      by: ['roomId'],
       where: {
-        createdAt: {
-          gte: fromDate,
-          lte: toDate,
-        },
-        status: {
-          in: ['CONFIRMED', 'CHECKED_IN', 'CHECKED_OUT'],
-        },
+        createdAt: { gte: fromDate, lte: toDate },
+        status: { in: ['CONFIRMED', 'CHECKED_IN', 'CHECKED_OUT'] }
       },
-      select: {
-        createdAt: true,
-        checkIn: true,
+      _count: true,
+      _sum: { paidAmount: true }
+    })
+
+    // Obtener información de las habitaciones con sus tipos
+    const roomsInfo = await prisma.room.findMany({
+      select: { 
+        id: true, 
+        number: true, 
+        roomType: {
+          select: { name: true }
+        }
+      }
+    })
+
+    const roomTypeData = reservationsByRoomType.map(item => {
+      const room = roomsInfo.find(r => r.id === item.roomId)
+      return {
+        roomName: room?.number || `Habitación ${item.roomId}`,
+        roomType: room?.roomType?.name || 'Desconocido',
+        reservations: item._count,
+        revenue: Number(item._sum.paidAmount || 0)
+      }
+    })
+
+    // ===== OCUPACIÓN DIARIA (últimos 30 días) - Simplificado =====
+    const thirtyDaysAgo = new Date()
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30)
+
+    const dailyOccupancyData = await prisma.reservation.findMany({
+      where: {
+        checkIn: { gte: thirtyDaysAgo, lte: toDate },
+        status: { in: ['CONFIRMED', 'CHECKED_IN', 'CHECKED_OUT'] }
       },
+      select: { checkIn: true }
+    })
+
+    const dailyOccupancy = dailyOccupancyData.reduce((acc: any[], res) => {
+      const date = res.checkIn.toISOString().split('T')[0] // YYYY-MM-DD
+      const existing = acc.find(item => item.date === date)
+      if (existing) {
+        existing.occupied_rooms++
+      } else {
+        acc.push({
+          date,
+          occupied_rooms: 1
+        })
+      }
+      return acc
+    }, []).sort((a, b) => a.date.localeCompare(b.date))
+
+    // ===== LEAD TIME Y DURACIÓN DE ESTADÍAS =====
+    const reservationsDetails = await prisma.reservation.findMany({
+      where: {
+        createdAt: { gte: fromDate, lte: toDate },
+        status: { in: ['CONFIRMED', 'CHECKED_IN', 'CHECKED_OUT'] }
+      },
+      select: { 
+        createdAt: true, 
+        checkIn: true, 
+        checkOut: true, 
+        userId: true,
+        user: {
+          select: { email: true }
+        }
+      }
     })
 
     let totalLeadTime = 0
-    reservationsWithLeadTime.forEach((res) => {
-      const leadTime = Math.ceil(
-        (new Date(res.checkIn).getTime() - new Date(res.createdAt).getTime()) /
-          (1000 * 60 * 60 * 24)
-      )
+    let totalStayDuration = 0
+    const leadTimeData: any[] = []
+
+    reservationsDetails.forEach((res) => {
+      const leadTime = Math.ceil((new Date(res.checkIn).getTime() - new Date(res.createdAt).getTime()) / (1000 * 60 * 60 * 24))
+      const stayDuration = Math.ceil((new Date(res.checkOut).getTime() - new Date(res.checkIn).getTime()) / (1000 * 60 * 60 * 24))
+      
       totalLeadTime += leadTime
+      totalStayDuration += stayDuration
+      leadTimeData.push({ leadTime, stayDuration, date: res.createdAt })
     })
 
-    const avgLeadTime =
-      reservationsWithLeadTime.length > 0 ? totalLeadTime / reservationsWithLeadTime.length : 0
+    const avgLeadTime = reservationsDetails.length > 0 ? totalLeadTime / reservationsDetails.length : 0
+    const avgStayDuration = reservationsDetails.length > 0 ? totalStayDuration / reservationsDetails.length : 0
+
+    // ===== CLIENTES RECURRENTES =====
+    const guestEmails = reservationsDetails.map(r => r.user.email).filter(Boolean)
+    const uniqueGuests = new Set(guestEmails).size
+    const totalGuestReservations = guestEmails.length
+    const returningGuestRate = uniqueGuests > 0 ? ((totalGuestReservations - uniqueGuests) / totalGuestReservations) * 100 : 0
+
+    // ===== TOP 5 HABITACIONES MÁS RENTABLES =====
+    const topRooms = roomTypeData
+      .sort((a, b) => b.revenue - a.revenue)
+      .slice(0, 5)
+
+    // ===== OCUPACIÓN SEMANAL (HEATMAP) - Simplificado =====
+    const weeklyOccupancyData = await prisma.reservation.findMany({
+      where: {
+        checkIn: { gte: thirtyDaysAgo, lte: toDate },
+        status: { in: ['CONFIRMED', 'CHECKED_IN', 'CHECKED_OUT'] }
+      },
+      select: { checkIn: true }
+    })
+
+    const weeklyOccupancy = weeklyOccupancyData.map(res => {
+      const date = new Date(res.checkIn)
+      return {
+        dayOfWeek: date.getDay() + 1, // 1-7 (Sunday = 1)
+        weekNumber: Math.ceil(date.getDate() / 7),
+        reservations: 1
+      }
+    }).reduce((acc: any[], curr) => {
+      const existing = acc.find(item => item.dayOfWeek === curr.dayOfWeek && item.weekNumber === curr.weekNumber)
+      if (existing) {
+        existing.reservations++
+      } else {
+        acc.push(curr)
+      }
+      return acc
+    }, [])
+
+    // ===== TASA DE OCUPACIÓN POR MES - Simplificado =====
+    const monthlyOccupancyData = await prisma.reservation.findMany({
+      where: {
+        checkIn: { gte: twelveMonthsAgo },
+        status: { in: ['CONFIRMED', 'CHECKED_IN', 'CHECKED_OUT'] }
+      },
+      select: { checkIn: true }
+    })
+
+    const monthlyOccupancyRate = monthlyOccupancyData.reduce((acc: any[], res) => {
+      const month = res.checkIn.toISOString().slice(0, 7) // YYYY-MM
+      const existing = acc.find(item => item.month === month)
+      if (existing) {
+        existing.occupied_nights++
+      } else {
+        acc.push({
+          month,
+          occupied_nights: 1,
+          available_nights: totalRooms * 30 // Aproximación
+        })
+      }
+      return acc
+    }, [])
 
     return NextResponse.json({
       summary: {
-        totalReservations,
-        confirmedReservations,
-        cancelledReservations,
+        totalReservations: totalReservations || 0,
+        confirmedReservations: confirmedReservations || 0,
+        cancelledReservations: cancelledReservations || 0,
         revenue: Number(revenue._sum.paidAmount || 0),
-        adr: Math.round(adr),
-        conversionRate: Math.round(conversionRate * 10) / 10,
-        cancellationRate: Math.round(cancellationRate * 10) / 10,
-        avgLeadTime: Math.round(avgLeadTime),
+        adr: Math.round(adr) || 0,
+        revpar: Math.round(revpar) || 0,
+        conversionRate: totalReservations > 0 ? Math.round(((confirmedReservations / totalReservations) * 100) * 10) / 10 : 0,
+        cancellationRate: totalReservations > 0 ? Math.round(((cancelledReservations / totalReservations) * 100) * 10) / 10 : 0,
+        avgLeadTime: Math.round(avgLeadTime) || 0,
+        avgStayDuration: Math.round(avgStayDuration * 10) / 10 || 0,
+        occupancyRate: totalRooms > 0 && availableRoomNights > 0 ? Math.round(((totalNights / availableRoomNights) * 100) * 10) / 10 : 0,
+        returningGuestRate: Math.round(returningGuestRate * 10) / 10 || 0,
+        totalRooms: totalRooms || 0,
+        uniqueGuests: uniqueGuests || 0
       },
       charts: {
-        reservationsByMonth,
-        roomTypeOccupancy,
-      },
+        revenueByMonth: revenueByMonth || [],
+        reservationsByRoomType: roomTypeData || [],
+        dailyOccupancy: dailyOccupancy || [],
+        leadTimeData: (leadTimeData || []).slice(0, 50), // Limitar para performance
+        topRooms: topRooms || [],
+        weeklyOccupancy: weeklyOccupancy || [],
+        monthlyOccupancyRate: monthlyOccupancyRate || [],
+        cancellationVsConfirmed: [
+          { name: 'Confirmadas', value: confirmedReservations || 0, color: '#10b981' },
+          { name: 'Canceladas', value: cancelledReservations || 0, color: '#ef4444' }
+        ]
+      }
     })
   } catch (error) {
     console.error('Error al obtener analíticas:', error)
