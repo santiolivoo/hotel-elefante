@@ -9,6 +9,8 @@ import { prisma } from '@/lib/prisma'
 import { formatCurrency } from '@/lib/utils'
 import { Users, Bed } from 'lucide-react'
 
+export const dynamic = 'force-dynamic'
+
 export default async function HabitacionesPage() {
   const roomTypes = await prisma.roomType.findMany({
     include: {
