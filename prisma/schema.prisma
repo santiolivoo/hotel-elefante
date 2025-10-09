@@ -1,0 +1,135 @@
+// Prisma Schema para Hotel Elefante
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlserver"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String        @id @default(cuid())
+  email         String        @unique
+  passwordHash  String
+  name          String
+  role          String        @default("USER")
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+  operatorInfo  Operator?
+  reservations  Reservation[]
+}
+
+model Operator {
+  id     String  @id @default(cuid())
+  userId String  @unique
+  phone  String?
+  active Boolean @default(true)
+  user   User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model RoomType {
+  id          Int      @id @default(autoincrement())
+  name        String
+  description String?  @db.Text
+  basePrice   Decimal  @db.Decimal(10, 2)
+  maxGuests   Int
+  rooms       Room[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model Amenity {
+  id    Int           @id @default(autoincrement())
+  name  String        @unique
+  icon  String?
+  rooms RoomAmenity[]
+}
+
+model Room {
+  id           Int           @id @default(autoincrement())
+  number       String        @unique
+  floor        Int
+  roomTypeId   Int
+  status       String        @default("AVAILABLE")
+  description  String?       @db.Text
+  images       String?       @db.Text // JSON string array de rutas
+  roomType     RoomType      @relation(fields: [roomTypeId], references: [id])
+  amenities    RoomAmenity[]
+  reservations Reservation[]
+  maintenances Maintenance[]
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+}
+
+model RoomAmenity {
+  roomId    Int
+  amenityId Int
+  room      Room    @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  amenity   Amenity @relation(fields: [amenityId], references: [id], onDelete: Cascade)
+
+  @@id([roomId, amenityId])
+}
+
+model Reservation {
+  id          String    @id @default(cuid())
+  roomId      Int
+  userId      String
+  checkIn     DateTime
+  checkOut    DateTime
+  guests      Int
+  status      String    @default("PENDING_PAYMENT")
+  totalAmount Decimal   @db.Decimal(10, 2)
+  paidAmount  Decimal   @db.Decimal(10, 2) @default(0)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  room        Room      @relation(fields: [roomId], references: [id])
+  user        User      @relation(fields: [userId], references: [id])
+  payment     Payment?
+}
+
+model Payment {
+  id            String      @id @default(cuid())
+  reservationId String      @unique
+  provider      String // "MERCADO_PAGO"
+  externalId    String? // ID de la transacción en MP
+  status        String // "approved", "in_process", "rejected"
+  amount        Decimal     @db.Decimal(10, 2)
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+  reservation   Reservation @relation(fields: [reservationId], references: [id], onDelete: Cascade)
+}
+
+model Maintenance {
+  id        Int      @id @default(autoincrement())
+  roomId    Int
+  reason    String?  @db.Text
+  from      DateTime
+  to        DateTime
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  room      Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+}
+
+model ContactMessage {
+  id        String    @id @default(cuid())
+  name      String
+  email     String
+  phone     String?
+  subject   String
+  message   String    @db.Text
+  status    String    @default("RECEIVED")
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  replies   Reply[]
+}
+
+model Reply {
+  id         String         @id @default(cuid())
+  contactId  String
+  operatorId String? // userId del operador
+  body       String         @db.Text
+  sentAt     DateTime       @default(now())
+  contact    ContactMessage @relation(fields: [contactId], references: [id], onDelete: Cascade)
+}

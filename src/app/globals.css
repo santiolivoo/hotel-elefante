@@ -1,0 +1,60 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Paleta elegante: Smoky Black, Celadon, Flax, Icterine, Reseda Green */
+    --background: 48 30% 95%;
+    --foreground: 40 22% 3%;
+    --card: 48 30% 98%;
+    --card-foreground: 40 22% 3%;
+    --popover: 48 30% 98%;
+    --popover-foreground: 40 22% 3%;
+    --primary: 81 12% 46%;
+    --primary-foreground: 48 30% 98%;
+    --secondary: 91 30% 73%;
+    --secondary-foreground: 40 22% 3%;
+    --muted: 91 25% 85%;
+    --muted-foreground: 81 12% 35%;
+    --accent: 48 67% 68%;
+    --accent-foreground: 40 22% 3%;
+    --destructive: 0 70% 50%;
+    --destructive-foreground: 48 30% 98%;
+    --border: 91 20% 80%;
+    --input: 91 20% 80%;
+    --ring: 81 12% 46%;
+    --radius: 0.5rem;
+  }
+
+  .dark {
+    --background: 40 22% 3%;
+    --foreground: 48 30% 95%;
+    --card: 40 22% 8%;
+    --card-foreground: 48 30% 95%;
+    --popover: 40 22% 8%;
+    --popover-foreground: 48 30% 95%;
+    --primary: 91 30% 73%;
+    --primary-foreground: 40 22% 3%;
+    --secondary: 81 12% 46%;
+    --secondary-foreground: 48 30% 95%;
+    --muted: 81 12% 25%;
+    --muted-foreground: 91 20% 60%;
+    --accent: 48 67% 68%;
+    --accent-foreground: 40 22% 3%;
+    --destructive: 0 70% 50%;
+    --destructive-foreground: 48 30% 95%;
+    --border: 81 12% 20%;
+    --input: 81 12% 20%;
+    --ring: 91 30% 73%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+}
