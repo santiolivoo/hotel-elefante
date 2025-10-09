@@ -3,7 +3,7 @@ import { prisma } from '@/lib/prisma'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 // @ts-ignore
-import mercadopago from 'mercadopago'
+import { MercadoPagoConfig, Preference } from 'mercadopago'
 
 export async function POST(request: NextRequest) {
   try {
@@ -37,15 +37,29 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'No autorizado' }, { status: 403 })
     }
 
-    // Configurar Mercado Pago
-    mercadopago.configure({
-      access_token: process.env.MP_ACCESS_TOKEN || '',
+    // Verificar si MP está configurado
+    if (!process.env.MP_ACCESS_TOKEN) {
+      console.warn('Mercado Pago no configurado - Simulando pago')
+      return NextResponse.json({
+        preferenceId: 'demo-preference',
+        initPoint: '/mis-reservas',
+        sandboxInitPoint: '/mis-reservas',
+        demo: true,
+      })
+    }
+
+    // Configurar Mercado Pago con nueva API
+    const client = new MercadoPagoConfig({
+      accessToken: process.env.MP_ACCESS_TOKEN,
     })
 
+    const preference = new Preference(client)
+
     // Crear preferencia de pago
-    const preference = {
+    const preferenceData = {
       items: [
         {
+          id: reservationId,
           title: `Hotel Elefante - ${reservation.room.roomType.name} - Hab. ${reservation.room.number}`,
           description: `Check-in: ${reservation.checkIn.toLocaleDateString('es-AR')} - Check-out: ${reservation.checkOut.toLocaleDateString('es-AR')}`,
           unit_price: Number(reservation.totalAmount),
@@ -58,21 +72,20 @@ export async function POST(request: NextRequest) {
         email: reservation.user.email,
       },
       back_urls: {
-        success: `${process.env.NEXT_PUBLIC_APP_URL}/reservas/${reservationId}/success`,
-        failure: `${process.env.NEXT_PUBLIC_APP_URL}/reservas/${reservationId}/failure`,
-        pending: `${process.env.NEXT_PUBLIC_APP_URL}/reservas/${reservationId}/pending`,
+        success: `${process.env.NEXTAUTH_URL}/mis-reservas`,
+        failure: `${process.env.NEXTAUTH_URL}/mis-reservas`,
+        pending: `${process.env.NEXTAUTH_URL}/mis-reservas`,
       },
       auto_return: 'approved' as const,
       external_reference: reservationId,
-      notification_url: `${process.env.NEXT_PUBLIC_APP_URL}/api/payments/mercadopago/webhook`,
     }
 
-    const response = await mercadopago.preferences.create(preference)
+    const response = await preference.create({ body: preferenceData })
 
     return NextResponse.json({
-      preferenceId: response.body.id,
-      initPoint: response.body.init_point,
-      sandboxInitPoint: response.body.sandbox_init_point,
+      preferenceId: response.id,
+      initPoint: response.init_point,
+      sandboxInitPoint: response.sandbox_init_point,
     })
   } catch (error) {
     console.error('Error al crear preferencia de Mercado Pago:', error)
