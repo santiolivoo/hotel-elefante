@@ -1,25 +1,37 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 // @ts-ignore
-import mercadopago from 'mercadopago'
+import { MercadoPagoConfig, Payment } from 'mercadopago'
 
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
 
-    // Configurar Mercado Pago
-    mercadopago.configure({
-      access_token: process.env.MP_ACCESS_TOKEN || '',
+    // Verificar si MP está configurado
+    if (!process.env.MP_ACCESS_TOKEN) {
+      console.warn('Mercado Pago no configurado - Webhook ignorado')
+      return NextResponse.json({ received: true })
+    }
+
+    // Configurar Mercado Pago con nueva API
+    const client = new MercadoPagoConfig({
+      accessToken: process.env.MP_ACCESS_TOKEN,
     })
+
+    const payment = new Payment(client)
 
     // Obtener información del pago
     if (body.type === 'payment') {
       const paymentId = body.data.id
 
-      const payment = await mercadopago.payment.get(paymentId)
-      const paymentData = payment.body
+      const paymentResponse = await payment.get({ id: paymentId })
+      const paymentData = paymentResponse
 
       const reservationId = paymentData.external_reference
+
+      if (!reservationId) {
+        return NextResponse.json({ error: 'No external_reference' }, { status: 400 })
+      }
 
       // Buscar si ya existe el pago
       const existingPayment = await prisma.payment.findUnique({
@@ -31,7 +43,7 @@ export async function POST(request: NextRequest) {
         await prisma.payment.update({
           where: { reservationId },
           data: {
-            status: paymentData.status,
+            status: paymentData.status || 'pending',
             externalId: paymentId.toString(),
           },
         })
@@ -41,8 +53,8 @@ export async function POST(request: NextRequest) {
           data: {
             reservationId,
             provider: 'MERCADO_PAGO',
-            status: paymentData.status,
-            amount: paymentData.transaction_amount,
+            status: paymentData.status || 'pending',
+            amount: paymentData.transaction_amount || 0,
             externalId: paymentId.toString(),
           },
         })
@@ -54,7 +66,7 @@ export async function POST(request: NextRequest) {
           where: { id: reservationId },
           data: {
             status: 'CONFIRMED',
-            paidAmount: paymentData.transaction_amount,
+            paidAmount: paymentData.transaction_amount || 0,
           },
         })
 
